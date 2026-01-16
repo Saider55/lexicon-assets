@@ -1,55 +1,47 @@
 /*
   Lexicon Translator – EN → SV
-  SAFE version (never leaves LexiconTranslate undefined)
+  HARDENED VERSION (never hangs)
 */
 
 (function () {
   console.log('[Lexicon] Script loaded');
 
-  // 🔒 ALWAYS define the function first
+  // Always defined
+  window.__LEXICON_TRANSLATOR_READY__ = false;
+
   window.LexiconTranslate = async function (text) {
-    console.warn('[Lexicon] Translator not ready yet, returning original text');
+    console.warn('[Lexicon] Translator not ready, fallback');
     return text;
   };
 
-  let worker = null;
-  let ready = false;
+  let worker;
   const pending = new Map();
 
   async function init() {
     try {
-      console.log('[Lexicon] Initializing worker…');
+      console.log('[Lexicon] Fetching worker…');
 
-      // 1️⃣ Fetch worker JS as text
       const res = await fetch(
         'https://unpkg.com/bergamot-translator-web@1.1.0/dist/worker.js'
       );
-      const code = await res.text();
 
-      // 2️⃣ Create same-origin worker
+      if (!res.ok) throw new Error('Worker fetch failed');
+
+      const code = await res.text();
       const blob = new Blob([code], { type: 'application/javascript' });
       const url = URL.createObjectURL(blob);
+
       worker = new Worker(url);
 
-      // 3️⃣ Load model
-      worker.postMessage({
-        type: 'loadModel',
-        config: {
-          from: 'en',
-          to: 'sv',
-          modelUrl:
-            'https://unpkg.com/bergamot-translator-web@1.1.0/dist/models/en-sv'
-        }
-      });
+      console.log('[Lexicon] Worker created');
 
       worker.onmessage = (e) => {
         const { type, translation } = e.data;
 
         if (type === 'ready') {
-          ready = true;
-          console.log('[Lexicon] Translator READY');
+          console.log('[Lexicon] MODEL READY');
+          window.__LEXICON_TRANSLATOR_READY__ = true;
 
-          // 🔁 Replace function with REAL implementation
           window.LexiconTranslate = function (text) {
             return new Promise((resolve) => {
               pending.set(text, resolve);
@@ -64,8 +56,28 @@
           pending.delete(text);
         }
       };
+
+      console.log('[Lexicon] Loading model…');
+
+      worker.postMessage({
+        type: 'loadModel',
+        config: {
+          from: 'en',
+          to: 'sv',
+          modelUrl:
+            'https://unpkg.com/bergamot-translator-web@1.1.0/dist/models/en-sv'
+        }
+      });
+
+      // ⏱️ HARD TIMEOUT (CRITICAL)
+      setTimeout(() => {
+        if (!window.__LEXICON_TRANSLATOR_READY__) {
+          console.error('[Lexicon] Translator FAILED to initialize');
+        }
+      }, 8000);
+
     } catch (err) {
-      console.error('[Lexicon] Failed to initialize', err);
+      console.error('[Lexicon] Fatal init error', err);
     }
   }
 
